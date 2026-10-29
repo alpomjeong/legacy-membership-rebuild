@@ -1,0 +1,80 @@
+# CI 스켈레톤 (E0.2) — 빌드/테스트/정적분석 게이트. 단계는 Phase 0 진행에 따라 확장.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# gitleaks-action 이 PR 커밋 목록을 읽는다 — 기본 토큰 권한이 좁으면 403.
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10 # node 20 호환 + lockfileVersion 9.0 (pnpm 11 은 Node>=22.13 요구)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --strict-peer-dependencies=false
+      - run: pnpm prisma generate
+      # validate 는 schema 의 env("DATABASE_URL") 해석에 값이 필요 — 형식만 맞는 더미면 충분(접속 안 함).
+      - run: pnpm prisma validate
+        env:
+          DATABASE_URL: postgresql://ci:ci@localhost:5432/ci?schema=public
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm build
+
+  # 프런트엔드 빌드 게이트
+  # 주: 과거 job 레벨 if 의 hashFiles() 가 워크플로 파싱 실패(전 런 0초 실패)의 원인이었음 —
+  #     hashFiles 는 step 레벨 전용. frontend/ 는 스캐폴딩 완료라 조건 자체를 제거.
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10 # node 20 호환 + lockfileVersion 9.0 (pnpm 11 은 Node>=22.13 요구)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile --strict-peer-dependencies=false
+      - run: pnpm build
+
+  # 보안 게이트 — 시크릿 스캔(차단) + 의존성 취약점 감사(비차단)
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # gitleaks 전체 히스토리 스캔
+      - name: Secret scan (gitleaks)
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10 # node 20 호환 + lockfileVersion 9.0 (pnpm 11 은 Node>=22.13 요구)
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Dependency audit — backend (non-blocking)
+        working-directory: backend
+        run: pnpm audit --audit-level=high || true

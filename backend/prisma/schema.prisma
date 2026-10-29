@@ -1,0 +1,503 @@
+// 회원관리 — Prisma 스키마 (Phase 0 베이스라인)
+// 운영 DB = PostgreSQL. 모델=PascalCase, 물리=snake_case(@map/@@map).
+// 공통 규약(PRD 7.1.1 / 기준서 §6): surrogate Id(BIGINT), TenantId,
+// 감사(createdAt/By·updatedAt/By), 소프트삭제(isDeleted/deletedAt), 시각=timestamptz(UTC).
+// 데이터모델 전수 반영: DM-01~20 + Tenant (기획서 docs/02 §데이터모델).
+// 의도적 텍스트 병행: 인물 슬롯(BuddhistServiceReg)과 Deceased(DM-04) 정규화는 Phase 2 단계 적용.
+// 예약(미사용) 컬럼: EnshrinementEvent 음력/간지/반복(Phase 2 변환서비스 연계).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// 테넌트(사찰) — 1단계 단일 사찰이나 멀티테넌시 대비 보존
+model Tenant {
+  id        BigInt    @id @default(autoincrement())
+  name      String    @db.VarChar(100)
+  isActive  Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("tenant")
+}
+
+/// 사원(인사) — DM-08. 주민번호는 암호화 저장(평문 금지, MAP-24)
+model Staff {
+  id            BigInt       @id @default(autoincrement())
+  tenantId      BigInt       @map("tenant_id")
+  staffNameKo   String       @map("staff_name_ko") @db.VarChar(100)
+  staffNameEn   String?      @map("staff_name_en") @db.VarChar(100)
+  isWorking     Boolean      @default(true) @map("is_working")
+  positionCode       String?  @map("position_code") @db.VarChar(20)
+  dutyCode           String?  @map("duty_code") @db.VarChar(20)
+  jobGroupCode       String?  @map("job_group_code") @db.VarChar(20)
+  staffDivCode       String?  @map("staff_div_code") @db.VarChar(20)
+  appellationDivCode String?  @map("appellation_div_code") @db.VarChar(20)
+  solarLunarCode     String?  @map("solar_lunar_code") @db.VarChar(20)
+  juminNoEnc    Bytes?       @map("jumin_no_enc")
+  juminNoMasked String?      @map("jumin_no_masked") @db.VarChar(20)
+  authLevelCode String?      @map("auth_level_code") @db.VarChar(20)
+  birthDate     DateTime?    @map("birth_date") @db.Date
+  photoUrl      String?      @map("photo_url") @db.VarChar(500)
+  smsReceiveYn  Boolean?     @map("sms_receive_yn")
+  joinDate      DateTime?    @map("join_date") @db.Date
+  retireDate    DateTime?    @map("retire_date") @db.Date
+  createdAt     DateTime     @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy     BigInt?      @map("created_by")
+  updatedAt     DateTime?    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy     BigInt?      @map("updated_by")
+  isDeleted     Boolean      @default(false) @map("is_deleted")
+  deletedAt     DateTime?    @map("deleted_at") @db.Timestamptz(6)
+  account       UserAccount?
+  buddhistServiceRegs BuddhistServiceReg[]
+
+  @@index([tenantId])
+  @@map("staff")
+}
+
+/// 로그인 계정 — DM-09. 비밀번호는 argon2/bcrypt 해시(평문 금지, NFR-SEC-02). StaffId NULL 허용(독립 계정, FR-AUTH-13)
+model UserAccount {
+  id                BigInt     @id @default(autoincrement())
+  tenantId          BigInt     @map("tenant_id")
+  staffId           BigInt?    @unique @map("staff_id")
+  loginId           String     @map("login_id") @db.VarChar(60)
+  passwordHash      String     @map("password_hash")
+  passwordSalt      String?    @map("password_salt")
+  isActive          Boolean    @default(true) @map("is_active")
+  mustResetPassword Boolean    @default(true) @map("must_reset_password")
+  failedLoginCount  Int        @default(0) @map("failed_login_count")
+  lockedUntil       DateTime?  @map("locked_until") @db.Timestamptz(6)
+  lastLoginAt       DateTime?  @map("last_login_at") @db.Timestamptz(6)
+  /// 이 시각 이전 발급 access 토큰은 무효 — 강제 로그아웃/비번초기화/비활성화의 즉시 차단(FR-AUTH).
+  accessInvalidBefore DateTime? @map("access_invalid_before") @db.Timestamptz(6)
+  createdAt         DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime?  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  isDeleted         Boolean    @default(false) @map("is_deleted")
+  staff             Staff?     @relation(fields: [staffId], references: [id])
+  roles             UserRole[]
+  refreshSessions   RefreshSession[]
+  pushTokens        PushToken[]
+
+  @@unique([tenantId, loginId])
+  @@map("user_account")
+}
+
+/// 기기 푸시 토큰(Expo). 로그인 기기별 1행(token unique), 기일 알림 발송 대상. FR-FUN-10.
+model PushToken {
+  id            BigInt      @id @default(autoincrement())
+  tenantId      BigInt      @map("tenant_id")
+  userAccountId BigInt      @map("user_account_id")
+  token         String      @unique @db.VarChar(255)
+  platform      String?     @db.VarChar(20)
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime?   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  userAccount   UserAccount @relation(fields: [userAccountId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId])
+  @@map("push_token")
+}
+
+/** refresh 세션(DM 신설) — 서버측 토큰 폐기/회전/강제 로그아웃 지원(NFR-SEC). */
+model RefreshSession {
+  id            BigInt      @id @default(autoincrement())
+  tenantId      BigInt      @map("tenant_id")
+  userAccountId BigInt      @map("user_account_id")
+  jti           String      @unique
+  tokenHash     String      @map("token_hash")
+  ipAddress     String?     @map("ip_address") @db.VarChar(64)
+  userAgent     String?     @map("user_agent")
+  createdAt     DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  lastUsedAt    DateTime?   @map("last_used_at") @db.Timestamptz(6)
+  expiresAt     DateTime    @map("expires_at") @db.Timestamptz(6)
+  revokedAt     DateTime?   @map("revoked_at") @db.Timestamptz(6)
+  userAccount   UserAccount @relation(fields: [userAccountId], references: [id])
+
+  @@index([userAccountId])
+  @@map("refresh_session")
+}
+
+/// 역할 — DM-10
+model Role {
+  id          BigInt           @id @default(autoincrement())
+  tenantId    BigInt           @map("tenant_id")
+  code        String           @db.VarChar(40)
+  name        String           @db.VarChar(60)
+  description String?
+  users       UserRole[]
+  perms       RolePermission[]
+
+  @@unique([tenantId, code])
+  @@map("role")
+}
+
+/// 권한(자원×액션, 예: member:read) — DM-11
+model Permission {
+  id       BigInt           @id @default(autoincrement())
+  code     String           @unique @db.VarChar(80)
+  name     String           @db.VarChar(80)
+  resource String           @db.VarChar(40)
+  action   String           @db.VarChar(20)
+  roles    RolePermission[]
+  menus    MenuPermission[]
+
+  @@map("permission")
+}
+
+/// 사용자-역할 할당 — DM-12
+model UserRole {
+  id            BigInt      @id @default(autoincrement())
+  userAccountId BigInt      @map("user_account_id")
+  roleId        BigInt      @map("role_id")
+  userAccount   UserAccount @relation(fields: [userAccountId], references: [id])
+  role          Role        @relation(fields: [roleId], references: [id])
+
+  @@unique([userAccountId, roleId])
+  @@map("user_role")
+}
+
+/// 역할-권한 매핑 — DM-13
+model RolePermission {
+  id           BigInt     @id @default(autoincrement())
+  roleId       BigInt     @map("role_id")
+  permissionId BigInt     @map("permission_id")
+  role         Role       @relation(fields: [roleId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([roleId, permissionId])
+  @@map("role_permission")
+}
+
+/// 공통코드(그룹/값 2단계) — DM-16. 매직 컨벤션(0000·^code^·4자 고정) 폐기
+model CommonCode {
+  id        BigInt  @id @default(autoincrement())
+  tenantId  BigInt  @map("tenant_id")
+  groupCode String  @map("group_code") @db.VarChar(20)
+  code      String  @db.VarChar(20)
+  name      String  @db.VarChar(100)
+  shortName String? @map("short_name") @db.VarChar(40)
+  sortOrder Int     @default(0) @map("sort_order")
+  isActive  Boolean @default(true) @map("is_active")
+
+  @@unique([tenantId, groupCode, code])
+  @@map("common_code")
+}
+
+/// 로그인 이력 — DM-17. 성공/실패/IP/UA 기록(FR-AUTH-17)
+model LoginHistory {
+  id            BigInt   @id @default(autoincrement())
+  userAccountId BigInt?  @map("user_account_id")
+  loginAt       DateTime @default(now()) @map("login_at") @db.Timestamptz(6)
+  ipAddress     String?  @map("ip_address") @db.VarChar(64)
+  userAgent     String?  @map("user_agent")
+  isSuccess     Boolean  @map("is_success")
+  failReason    String?  @map("fail_reason") @db.VarChar(100)
+
+  @@index([userAccountId])
+  @@map("login_history")
+}
+
+/// 감사 로그 — DM-18. 권한변경/삭제/대량업로드/PII복호 등(NFR-SEC-17)
+model AuditLog {
+  id            BigInt   @id @default(autoincrement())
+  tenantId      BigInt?  @map("tenant_id")
+  userAccountId BigInt?  @map("user_account_id")
+  actionType    String   @map("action_type") @db.VarChar(40)
+  entityName    String?  @map("entity_name") @db.VarChar(60)
+  entityId      String?  @map("entity_id") @db.VarChar(60)
+  beforeJson    Json?    @map("before_json")
+  afterJson     Json?    @map("after_json")
+  occurredAt    DateTime @default(now()) @map("occurred_at") @db.Timestamptz(6)
+  ipAddress     String?  @map("ip_address") @db.VarChar(64)
+
+  @@index([entityName, entityId])
+  @@map("audit_log")
+}
+
+/// 회원 — DM-01. 식별은 surrogate Id(BigInt). 표시명 `이름_포교원장`은 파생(미저장, FR-MEM-02).
+/// (TenantId,MemberName,MissionaryId) 보조 인덱스는 비유일 — 동명이인 공존·중복 경고용(FR-MEM-19).
+model Member {
+  id              BigInt      @id @default(autoincrement())
+  tenantId        BigInt      @map("tenant_id")
+  memberName      String      @map("member_name") @db.VarChar(100)
+  affiliationCode String?     @map("affiliation_code") @db.VarChar(20)
+  phone           String?     @db.VarChar(30)
+  address         String?     @db.VarChar(200)
+  addressDetail   String?     @map("address_detail") @db.VarChar(200)
+  zipCode         String?     @map("zip_code") @db.VarChar(20)
+  missionaryId    BigInt?     @map("missionary_id")
+  memo            String?
+  /// 생년월일 원문(레거시 육십갑자 간지코드/비정형 텍스트 보존, DM-19). 날짜 아님 — 문자열 그대로.
+  birthRaw        String?     @map("birth_raw")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       BigInt?     @map("created_by")
+  updatedAt       DateTime?   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       BigInt?     @map("updated_by")
+  isDeleted       Boolean     @default(false) @map("is_deleted")
+  deletedAt       DateTime?   @map("deleted_at") @db.Timestamptz(6)
+  missionary      Missionary? @relation(fields: [missionaryId], references: [id])
+  buddhistServiceRegs BuddhistServiceReg[]
+  counsels        Counsel[]
+  deceasedList    Deceased[]
+
+  @@index([tenantId, memberName])
+  @@index([tenantId, phone])
+  @@index([tenantId, memberName, missionaryId])
+  @@map("member")
+}
+
+/// 포교원장 마스터(최소) — Member.MissionaryId 룩업 대상. 자유입력 차단(FR-MEM-04).
+model Missionary {
+  id        BigInt    @id @default(autoincrement())
+  tenantId  BigInt    @map("tenant_id")
+  name          String    @db.VarChar(100)
+  phone         String?   @db.VarChar(30)
+  address       String?   @db.VarChar(200)
+  addressDetail String?   @map("address_detail") @db.VarChar(200)
+  zipCode       String?   @map("zip_code") @db.VarChar(20)
+  isActive      Boolean   @default(true) @map("is_active")
+  createdAt DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy BigInt?   @map("created_by")
+  updatedAt DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy BigInt?   @map("updated_by")
+  isDeleted Boolean   @default(false) @map("is_deleted")
+  deletedAt DateTime? @map("deleted_at") @db.Timestamptz(6)
+  members   Member[]
+
+  @@index([tenantId])
+  @@map("missionary")
+}
+
+/// 불사목록 마스터 — DM-06. ServiceTypeCode(CommonCode)로 인물 슬롯 규칙 구동.
+model BuddhistServiceItem {
+  id              BigInt    @id @default(autoincrement())
+  tenantId        BigInt    @map("tenant_id")
+  name            String    @db.VarChar(200)
+  referenceAmount Decimal?  @map("reference_amount") @db.Decimal(18, 2)
+  serviceTypeCode String?   @map("service_type_code") @db.VarChar(20)
+  photoUrl        String?   @map("photo_url") @db.VarChar(500)
+  description     String?
+  isActive        Boolean   @default(true) @map("is_active")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy       BigInt?   @map("created_by")
+  updatedAt       DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy       BigInt?   @map("updated_by")
+  isDeleted       Boolean   @default(false) @map("is_deleted")
+  deletedAt       DateTime? @map("deleted_at") @db.Timestamptz(6)
+  regs            BuddhistServiceReg[]
+  enshrinementEvents EnshrinementEvent[]
+
+  @@index([tenantId])
+  @@index([tenantId, serviceTypeCode])
+  @@map("buddhist_service_item")
+}
+
+/// 서비스 타입별 인물 슬롯 규칙 — DM-20. 하드코딩 금지, 메타데이터로 슬롯 노출/필수/라벨/검색 관리.
+model ServiceTypeSlotRule {
+  id              BigInt   @id @default(autoincrement())
+  tenantId        BigInt   @map("tenant_id")
+  serviceTypeCode String   @map("service_type_code") @db.VarChar(20)
+  slotKey         String   @map("slot_key") @db.VarChar(20)
+  isVisible       Boolean  @default(true) @map("is_visible")
+  isRequired      Boolean  @default(false) @map("is_required")
+  labelOverride   String?  @map("label_override") @db.VarChar(100)
+  sortOrder       Int      @default(0) @map("sort_order")
+  searchIndexed   Boolean  @default(false) @map("search_indexed")
+
+  @@unique([tenantId, serviceTypeCode, slotKey])
+  @@map("service_type_slot_rule")
+}
+
+/// 육십갑자(간지) 마스터 — DM-19. 코드 1000~1118(2씩, 60항목). 생년월일은 날짜가 아닌 간지 코드.
+model SexagenaryYear {
+  id            BigInt   @id @default(autoincrement())
+  tenantId      BigInt   @map("tenant_id")
+  code          Int
+  ganjiNameKo   String   @map("ganji_name_ko") @db.VarChar(40)
+  ganjiNameHanja String? @map("ganji_name_hanja") @db.VarChar(40)
+  isActive      Boolean  @default(true) @map("is_active")
+  regs          BuddhistServiceReg[]
+  enshrinementEvents EnshrinementEvent[]
+  deceasedList  Deceased[]
+  gregorianMappings SexagenaryYearMapping[]
+
+  @@unique([tenantId, code])
+  @@map("sexagenary_year")
+}
+
+/// 육십갑자↔서기년 매핑(자식) — DM-19. 간지 1코드가 60년 간격 다수 서기년에 대응.
+model SexagenaryYearMapping {
+  id               BigInt         @id @default(autoincrement())
+  sexagenaryYearId BigInt         @map("sexagenary_year_id")
+  gregorianYear    Int            @map("gregorian_year")
+  sexagenaryYear   SexagenaryYear @relation(fields: [sexagenaryYearId], references: [id])
+
+  @@unique([sexagenaryYearId, gregorianYear])
+  @@map("sexagenary_year_mapping")
+}
+
+/// 봉안일/기일 이벤트 — DM-03. 양력 timestamptz 저장(KST 표시). 음력/간지/반복 컬럼은
+/// Phase 1 예약(NULL 허용·미사용); CRUD/명단은 E1.6, 변환 계산은 Phase 2.
+model EnshrinementEvent {
+  id                          BigInt    @id @default(autoincrement())
+  tenantId                    BigInt    @map("tenant_id")
+  eventDateSolar              DateTime  @map("event_date_solar") @db.Timestamptz(6)
+  eventDateLunar              DateTime? @map("event_date_lunar") @db.Date
+  isLunarLeapMonth            Boolean   @default(false) @map("is_lunar_leap_month")
+  sexagenaryYearId            BigInt?   @map("sexagenary_year_id")
+  recurrenceType              String?   @map("recurrence_type") @db.VarChar(20)
+  recurrenceRule              String?   @map("recurrence_rule") @db.VarChar(200)
+  defaultBuddhistServiceItemId BigInt?  @map("default_buddhist_service_item_id")
+  label                       String?   @db.VarChar(200)
+  remark                      String?
+  createdAt                   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy                   BigInt?   @map("created_by")
+  updatedAt                   DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy                   BigInt?   @map("updated_by")
+  isDeleted                   Boolean   @default(false) @map("is_deleted")
+  deletedAt                   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  sexagenaryYear              SexagenaryYear?      @relation(fields: [sexagenaryYearId], references: [id])
+  defaultBuddhistServiceItem  BuddhistServiceItem? @relation(fields: [defaultBuddhistServiceItemId], references: [id])
+  regs                        BuddhistServiceReg[]
+  deceasedMemorials           Deceased[]
+
+  @@index([tenantId, eventDateSolar])
+  @@map("enshrinement_event")
+}
+
+/// 불사 신청(중심 팩트) — DM-02. 회원 1명 귀속, 입력일 서버 KST 자동, 동일 불사 다중 입력 허용.
+/// 인물 슬롯(복위자/복전자/영가/예수재/12성주)은 텍스트; 단번호는 문자열(선행 0 보존).
+model BuddhistServiceReg {
+  id                    BigInt    @id @default(autoincrement())
+  tenantId              BigInt    @map("tenant_id")
+  registrationDate      DateTime  @map("registration_date") @db.Date
+  staffId               BigInt?   @map("staff_id")
+  enshrinementEventId   BigInt?   @map("enshrinement_event_id")
+  memberId              BigInt    @map("member_id")
+  buddhistServiceItemId BigInt    @map("buddhist_service_item_id")
+  altarNumber           String?   @map("altar_number")
+  bogwija               String?   @db.VarChar(200)
+  relationship          String?   @db.VarChar(100)
+  bokjunja              String?
+  spiritual             String?
+  yesujae               String?
+  seongju12             String?   @db.VarChar(100)
+  sexagenaryYearId      BigInt?   @map("sexagenary_year_id")
+  donationAmount        Decimal?  @map("donation_amount") @db.Decimal(18, 2)
+  memo                  String?
+  isCanceled            Boolean   @default(false) @map("is_canceled")
+  canceledAt            DateTime? @map("canceled_at") @db.Timestamptz(6)
+  canceledBy            BigInt?   @map("canceled_by")
+  isCertificateIssued   Boolean   @default(false) @map("is_certificate_issued")
+  certificateIssuedDate DateTime? @map("certificate_issued_date") @db.Date
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy             BigInt?   @map("created_by")
+  updatedAt             DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy             BigInt?   @map("updated_by")
+  isDeleted             Boolean   @default(false) @map("is_deleted")
+  deletedAt             DateTime? @map("deleted_at") @db.Timestamptz(6)
+  member                Member               @relation(fields: [memberId], references: [id])
+  buddhistServiceItem   BuddhistServiceItem  @relation(fields: [buddhistServiceItemId], references: [id])
+  enshrinementEvent     EnshrinementEvent?   @relation(fields: [enshrinementEventId], references: [id])
+  staff                 Staff?               @relation(fields: [staffId], references: [id])
+  sexagenaryYear        SexagenaryYear?      @relation(fields: [sexagenaryYearId], references: [id])
+
+  @@index([tenantId, memberId])
+  @@index([tenantId, enshrinementEventId])
+  @@index([tenantId, buddhistServiceItemId])
+  @@map("buddhist_service_reg")
+}
+
+/// 상담 — DM-05. 회원 1:N. 상담일시(timestamptz, KST 표시/UTC 저장)·내용 필수. 소프트삭제·감사.
+model Counsel {
+  id          BigInt    @id @default(autoincrement())
+  tenantId    BigInt    @map("tenant_id")
+  memberId    BigInt    @map("member_id")
+  counseledAt DateTime  @map("counseled_at") @db.Timestamptz(6)
+  content     String
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy   BigInt?   @map("created_by")
+  updatedAt   DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy   BigInt?   @map("updated_by")
+  isDeleted   Boolean   @default(false) @map("is_deleted")
+  deletedAt   DateTime? @map("deleted_at") @db.Timestamptz(6)
+  member      Member    @relation(fields: [memberId], references: [id])
+
+  @@index([tenantId, memberId])
+  @@index([tenantId, counseledAt])
+  @@map("counsel")
+}
+
+/// 망자 — DM-04. Phase 1 의사결정으로 채택. 레거시는 인물 슬롯 텍스트로 분산 → 1급 엔티티 정규화.
+/// (Phase 1 MVP는 BuddhistServiceReg 텍스트 슬롯 병행 보존, 본 엔티티는 정규화 적용 대상)
+model Deceased {
+  id               BigInt   @id @default(autoincrement())
+  tenantId         BigInt   @map("tenant_id")
+  name             String   @db.VarChar(100)
+  clanName         String?  @map("clan_name") @db.VarChar(100)
+  relationToMember String?  @map("relation_to_member") @db.VarChar(100)
+  memberId         BigInt?  @map("member_id")
+  sexagenaryYearId BigInt?  @map("sexagenary_year_id")
+  memorialEventId  BigInt?  @map("memorial_event_id")
+  altarNumber      String?  @map("altar_number")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  createdBy        BigInt?   @map("created_by")
+  updatedAt        DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+  updatedBy        BigInt?   @map("updated_by")
+  isDeleted        Boolean   @default(false) @map("is_deleted")
+  deletedAt        DateTime? @map("deleted_at") @db.Timestamptz(6)
+  member           Member?            @relation(fields: [memberId], references: [id])
+  sexagenaryYear   SexagenaryYear?    @relation(fields: [sexagenaryYearId], references: [id])
+  memorialEvent    EnshrinementEvent? @relation(fields: [memorialEventId], references: [id])
+
+  @@index([tenantId, name])
+  @@map("deceased")
+}
+
+/// 메뉴 — DM-14. 메뉴코드/계층을 데이터화(레거시 CM_Menu, MenuLavel 오타 정정→level). SPA는 권한으로 렌더.
+model Menu {
+  id        BigInt   @id @default(autoincrement())
+  tenantId  BigInt   @map("tenant_id")
+  code      String   @db.VarChar(40)
+  name      String   @db.VarChar(100)
+  parentId  BigInt?  @map("parent_id")
+  sortOrder Int      @default(0) @map("sort_order")
+  isActive  Boolean  @default(true) @map("is_active")
+  level     Int      @default(0)
+  parent    Menu?            @relation("MenuTree", fields: [parentId], references: [id])
+  children  Menu[]           @relation("MenuTree")
+  permissions MenuPermission[]
+
+  @@unique([tenantId, code])
+  @@map("menu")
+}
+
+/// 메뉴-권한 매핑 — DM-15. 메뉴 노출/접근 권한 연결을 데이터로 관리(인가 강제는 서버 권한 검증).
+model MenuPermission {
+  id           BigInt     @id @default(autoincrement())
+  menuId       BigInt     @map("menu_id")
+  permissionId BigInt     @map("permission_id")
+  menu         Menu       @relation(fields: [menuId], references: [id])
+  permission   Permission @relation(fields: [permissionId], references: [id])
+
+  @@unique([menuId, permissionId])
+  @@map("menu_permission")
+}
+
+/// 사용자별 UI 설정(JSON) — 캔버스 레이아웃 등. 어느 기기/세션에서 로그인해도 동일 복원.
+model UserSetting {
+  id            BigInt    @id @default(autoincrement())
+  tenantId      BigInt    @map("tenant_id")
+  userAccountId BigInt    @map("user_account_id")
+  key           String    @db.VarChar(64)
+  value         Json
+  createdAt     DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt     DateTime? @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@unique([userAccountId, key])
+  @@map("user_setting")
+}

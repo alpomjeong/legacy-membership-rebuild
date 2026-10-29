@@ -1,0 +1,116 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   확정 디자인 토큰 — 한지/먹/청자/주홍 (Light theme only)
+   temple-admin 목업의 팔레트를 그대로 계승.
+   ============================================================ */
+@layer base {
+  :root {
+    /* 밝고 깨끗한 톤(은은한 온기) + 청자 포인트. 노이즈 그레인 제거. */
+    --background: 40 22% 97%;
+    --foreground: 30 16% 16%;
+    --card: 0 0% 100%;
+    --card-foreground: 30 16% 16%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 30 16% 16%;
+    --primary: 167 44% 33%; /* 청자(celadon) — 살짝 선명하게 */
+    --primary-foreground: 40 30% 99%;
+    --secondary: 40 18% 94%;
+    --secondary-foreground: 30 16% 24%;
+    --muted: 40 16% 94%;
+    --muted-foreground: 33 10% 46%;
+    --accent: 160 34% 93%; /* 연한 청자 틴트 */
+    --accent-foreground: 167 44% 26%;
+    --destructive: 8 72% 47%; /* 주홍(vermilion) */
+    --destructive-foreground: 40 30% 99%;
+    --border: 38 14% 88%;
+    --input: 38 14% 87%;
+    --ring: 167 44% 33%;
+    --radius: 0.5rem;
+  }
+
+  /* 다크 모드 — 청자/주홍 포인트 유지, 따뜻한 차콜 베이스 */
+  .dark {
+    --background: 30 8% 10%;
+    --foreground: 40 16% 90%;
+    --card: 30 8% 13%;
+    --card-foreground: 40 16% 90%;
+    --popover: 30 8% 13%;
+    --popover-foreground: 40 16% 90%;
+    --primary: 167 42% 45%;
+    --primary-foreground: 30 10% 8%;
+    --secondary: 30 7% 18%;
+    --secondary-foreground: 40 14% 86%;
+    --muted: 30 7% 18%;
+    --muted-foreground: 36 8% 60%;
+    --accent: 167 28% 22%;
+    --accent-foreground: 160 40% 82%;
+    --destructive: 8 66% 54%;
+    --destructive-foreground: 40 30% 97%;
+    --border: 30 7% 24%;
+    --input: 30 7% 26%;
+    --ring: 167 42% 45%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground font-sans;
+    /* 깨끗한 배경 + 아주 은은한 청자/금 코너 글로우(그레인 없음) */
+    background-image:
+      radial-gradient(1000px 600px at 92% -12%, hsl(167 44% 33% / 0.05), transparent 60%),
+      radial-gradient(820px 520px at -10% 112%, hsl(40 48% 55% / 0.04), transparent 55%);
+    background-attachment: fixed;
+  }
+  ::selection {
+    background: hsl(167 44% 33%);
+    color: #fff;
+  }
+}
+
+/* 도장(낙관) 인장 — 주홍 낙관 톤 */
+.seal {
+  background: linear-gradient(160deg, #c1503b, #9c2f1f);
+  color: #fff8ee;
+  box-shadow:
+    inset 0 0 0 2px rgba(255, 255, 255, 0.25),
+    0 4px 10px -4px rgba(120, 30, 18, 0.55);
+}
+
+/* ============================================================
+   2.0 모던 스킨 — html.modern 에서만 적용(레거시 무영향)
+   ============================================================ */
+.modern { --radius: 0.95rem; }
+.modern body {
+  background-image:
+    radial-gradient(1100px 560px at 100% -8%, hsl(var(--accent) / 0.55), transparent 60%),
+    radial-gradient(820px 520px at -8% 108%, hsl(var(--primary) / 0.08), transparent 55%);
+  background-attachment: fixed;
+}
+.modern ::-webkit-scrollbar { width: 10px; height: 10px; }
+.modern ::-webkit-scrollbar-thumb { background: hsl(var(--muted-foreground) / 0.30); border-radius: 99px; border: 2px solid transparent; background-clip: padding-box; }
+.modern ::-webkit-scrollbar-thumb:hover { background: hsl(var(--muted-foreground) / 0.5); }
+
+/* 모던 유틸 — JSX 조건부로 부여 */
+.tm-glass { background-color: hsl(var(--background) / 0.65); backdrop-filter: blur(18px) saturate(140%); -webkit-backdrop-filter: blur(18px) saturate(140%); }
+.modern .tm-card { box-shadow: 0 10px 34px -16px rgba(20,16,10,0.30), 0 2px 8px -4px rgba(20,16,10,0.10); }
+.dark.modern .tm-card, .dark .modern .tm-card { box-shadow: 0 12px 40px -16px rgba(0,0,0,0.6); }
+
+/* 모바일 하단 탭바 여백(콘텐츠가 가려지지 않게) */
+@media (max-width: 767px) { .has-bottomnav { padding-bottom: 72px; } }
+
+/* 캔버스 경량 모드 — 패널 안 화면의 제목/설명/주석 숨겨 그리드만 */
+.tm-lite [data-tm-pttext] { display: none; }
+.tm-lite [data-tm-pagetitle] { margin-bottom: 0.5rem; }
+.tm-lite [data-tm-ann] { display: none; }
+/* 좌측 메뉴 드래그 중 커서/표시 */
+.tm-drag-src { cursor: grab; }
+.tm-drag-src:active { cursor: grabbing; }
+/* 캔버스 드롭존 하이라이트(포인터 드래그가 위에 있을 때) */
+.tm-dropring { outline: 2px solid hsl(167 44% 33%); outline-offset: 4px; border-radius: 1rem; background: hsl(160 34% 93% / 0.45); }
+.dark .tm-dropring { background: hsl(167 28% 22% / 0.4); }

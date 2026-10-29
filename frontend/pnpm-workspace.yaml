@@ -1,0 +1,6 @@
+# Standalone frontend package (not part of the backend workspace).
+# Allowlist of dependencies permitted to run install/build scripts (pnpm 10+).
+allowBuilds:
+  esbuild: true
+onlyBuiltDependencies:
+  - esbuild

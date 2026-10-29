@@ -1,0 +1,86 @@
+# ===== macOS =====
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+
+# ===== IDE / Editor =====
+.vs/
+.idea/
+*.user
+*.suo
+*.swp
+*~
+
+# ===== Secrets / Env (절대 커밋 금지) =====
+.env
+.env.*
+*.local
+appsettings.*.local.json
+appsettings.Development.json
+secrets.json
+*.pfx
+*.key
+# 원클릭 설치가 신규 PG 설치 시 생성하는 postgres 슈퍼유저 비번 메모(런타임 생성물)
+infra/native/postgres-슈퍼유저-비번.txt
+# 예시/템플릿은 추적 (실제 비밀 아님)
+!.env.example
+!**/.env.example
+!infra/secrets.template
+
+# ===== .NET (backend, 향후) =====
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.dll
+*.pdb
+TestResults/
+.vs/
+
+# ===== Node / React / Vite (frontend, 향후) =====
+node_modules/
+dist/
+build/
+.vite/
+.parcel-cache/
+coverage/
+*.tsbuildinfo
+*.log
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+.pnpm-store/
+
+# ===== Docker / Infra (로컬 상태) =====
+*.tfstate
+*.tfstate.*
+.terraform/
+
+# ===== 데이터/백업 (레거시 .bak 등 대용량·민감 자료는 커밋 금지) =====
+*.bak
+*.mdf
+*.ldf
+*.xlsx
+*.xls
+
+# ===== Logs =====
+logs/
+*.log
+
+# 네이티브 실행 로컬 데이터(업로드/백업 산출물)
+/data/
+
+# 구 도커 트랙 백업 산출물(로컬 잔존분)
+infra/temple-backups/
+
+# 런타임 업로드/백업 산출물(로컬 테스트 시 생성)
+backend/data/
+
+# 공개본 — 운영 데이터/시크릿 유입 차단
+.env
+.env.*
+!.env.example
+*.dump
+*.bak
+reference-seed-private.sql

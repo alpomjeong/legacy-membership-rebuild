@@ -1,0 +1,9 @@
+node_modules
+dist
+.expo
+.env.local
+.env.local.bak
+ios
+android
+*.log
+coverage

@@ -1,0 +1,15 @@
+allowBuilds:
+  '@prisma/engines': true
+  prisma: true
+  '@prisma/client': true
+  unrs-resolver: true
+  argon2: true
+  '@scarf/scarf': false
+  msgpackr-extract: false
+
+# 보안 패치(dependency-auditor) — 전이 의존성 취약점 강제 상향.
+# multer DoS(high+moderate) >=2.2.0, js-yaml DoS(moderate) >=4.1.2.
+# uuid(moderate, buf 인자 전달 시만 해당 — 미사용)는 v11 ESM 전환으로 Jest 파싱 깨져 제외.
+overrides:
+  multer: '>=2.2.0'
+  js-yaml: '>=4.1.2'

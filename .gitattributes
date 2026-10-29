@@ -1,0 +1,21 @@
+# 윈도우 실행 스크립트는 반드시 CRLF 로 체크아웃되게 고정한다.
+#
+# 이유: cmd.exe 는 LF 만 있는 .bat 의 다중행 블록( if ... ( ) else if ... ( ) , for ... do ( ) )을
+# 제대로 못 읽는다 — "else was unexpected at this time" 로 죽거나 줄이 잘려 실행된다.
+# clone 하는 사람의 core.autocrlf 설정에 의존하면 안 되므로 여기서 못 박는다.
+# (리포에는 LF 로 저장되고, 체크아웃할 때 CRLF 로 변환된다.)
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+*.vbs text eol=crlf
+
+# PostgreSQL 백업 덤프 — 텍스트 변환 금지(손상됨)
+*.dump binary
+*.xlsx binary
+
+# 공개 배포본(git archive)에서 제외 — 공개 리포를 뜰 때 딸려가면 안 되는 것들.
+#   reference-seed-private.sql : 항목명에 시주자 실명이 들어 있다(별도 전달분).
+#   mockup/                    : 초기 흐름 목업. 내부 참고용이고 빌드·서빙 어디서도 안 쓴다.
+# 사용: git archive --format=tar HEAD | tar -x -C <새폴더>
+infra/native/reference-seed-private.sql export-ignore
+mockup/ export-ignore
